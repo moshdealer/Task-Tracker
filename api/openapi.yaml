@@ -1,0 +1,907 @@
+openapi: 3.0.3
+info:
+  title: Task Tracker API
+  version: 1.0.0
+paths:
+  /api/v1/register:
+    post:
+      tags:
+        - Auth
+      summary: Регистрация пользователя
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Пользователь зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Пользователь с таким email уже существует
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/login:
+    post:
+      tags:
+        - Auth
+      summary: Аутентификация пользователя
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Аутентификация выполнена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/teams:
+    post:
+      tags:
+        - Teams
+      summary: Создание команды
+      operationId: createTeam
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "201":
+          description: Команда создана, текущий пользователь назначен владельцем
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      tags:
+        - Teams
+      summary: Список команд текущего пользователя
+      operationId: listTeams
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Команды, в которых состоит текущий пользователь
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/teams/{id}/invite:
+    post:
+      tags:
+        - Teams
+      summary: Добавление существующего пользователя в команду
+      description: Владелец может добавить member или admin, администратор — только member
+      operationId: inviteTeamMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор команды
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteMemberRequest"
+      responses:
+        "204":
+          description: Пользователь добавлен в команду
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Пользователь с указанным email не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Пользователь уже состоит в команде
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/teams/{id}/members/{user_id}/role:
+    put:
+      tags:
+        - Teams
+      summary: Изменение роли участника команды
+      description: Доступно только владельцу команды. Роль владельца изменить нельзя
+      operationId: changeTeamMemberRole
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор команды
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: user_id
+          in: path
+          required: true
+          description: Идентификатор существующего участника команды
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeMemberRoleRequest"
+      responses:
+        "204":
+          description: Роль участника изменена или уже имела указанное значение
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Запрос выполнил не владелец команды или изменяется роль владельца
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Участник команды не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/teams/{team_id}/stats:
+    get:
+      tags:
+        - Analytics
+      summary: Статистика задач одной команды
+      description: |
+        Доступно только владельцу и администраторам команды.
+        Задачи `cancel` учитываются в распределении по статусам, но не входят
+        в топ-3 исполнителей и расчёт среднего времени выполнения. Эти метрики
+        производительности рассчитываются только по задачам `done`.
+      operationId: getTeamStats
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          description: Идентификатор команды
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Агрегированная статистика команды
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamStatsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/TeamNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/tasks:
+    post:
+      tags:
+        - Tasks
+      summary: Создание задачи
+      operationId: createTask
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Задача создана вместе с начальной записью истории
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      tags:
+        - Tasks
+      summary: Список задач команды
+      operationId: listTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: query
+          required: true
+          description: Идентификатор команды
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - name: assignee_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Задачи команды, отсортированные от новых к старым
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/tasks/{id}:
+    put:
+      tags:
+        - Tasks
+      summary: Частичное обновление задачи с проверкой версии
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+      responses:
+        "200":
+          description: Задача обновлена или возвращена без изменения для no-op
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "409":
+          $ref: "#/components/responses/VersionConflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/tasks/{id}/history:
+    get:
+      tags:
+        - Tasks
+      summary: История изменений задачи
+      operationId: getTaskHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+      responses:
+        "200":
+          description: История от старых записей к новым
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskHistoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/v1/tasks/{id}/comments:
+    post:
+      tags:
+        - Comments
+      summary: Добавление комментария к задаче
+      description: Доступно любому участнику команды задачи независимо от её статуса
+      operationId: createTaskComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Комментарий создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      tags:
+        - Comments
+      summary: Список комментариев задачи
+      description: Возвращает комментарии от старых к новым
+      operationId: listTaskComments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+      responses:
+        "200":
+          description: Комментарии задачи
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CommentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - name
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        name:
+          type: string
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    UserResponse:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    LoginResponse:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+    CreateTeamRequest:
+      type: object
+      required:
+        - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+    TeamResponse:
+      type: object
+      required:
+        - id
+        - name
+        - created_by
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+        created_by:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+    InviteMemberRequest:
+      type: object
+      required:
+        - email
+        - role
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum:
+            - member
+            - admin
+    ChangeMemberRoleRequest:
+      type: object
+      required:
+        - role
+      additionalProperties: false
+      properties:
+        role:
+          type: string
+          enum:
+            - member
+            - admin
+    TaskStatus:
+      type: string
+      enum:
+        - todo
+        - in_progress
+        - hold
+        - done
+        - cancel
+    CreateTaskRequest:
+      type: object
+      required:
+        - team_id
+        - title
+      additionalProperties: false
+      properties:
+        team_id:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        status:
+          allOf:
+            - $ref: "#/components/schemas/TaskStatus"
+          default: todo
+        assignee_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+    UpdateTaskRequest:
+      type: object
+      required:
+        - version
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Последняя версия задачи, полученная клиентом
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        assignee_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+    TaskResponse:
+      type: object
+      required:
+        - id
+        - team_id
+        - title
+        - description
+        - status
+        - created_by
+        - assignee_id
+        - created_at
+        - updated_at
+        - closed_at
+        - version
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        team_id:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        created_by:
+          type: integer
+          format: int64
+          minimum: 1
+        assignee_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+    FieldChange:
+      type: object
+      required:
+        - old
+        - new
+      properties:
+        old: {}
+        new: {}
+    TaskHistoryEntry:
+      type: object
+      required:
+        - id
+        - task_id
+        - changed_by
+        - changes
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        task_id:
+          type: integer
+          format: int64
+          minimum: 1
+        changed_by:
+          type: integer
+          format: int64
+          minimum: 1
+        changes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/FieldChange"
+        created_at:
+          type: string
+          format: date-time
+    CreateCommentRequest:
+      type: object
+      required:
+        - content
+      additionalProperties: false
+      properties:
+        content:
+          type: string
+          minLength: 1
+          description: Текст сохраняется после удаления пробелов по краям
+    CommentResponse:
+      type: object
+      required:
+        - id
+        - task_id
+        - user_id
+        - content
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        task_id:
+          type: integer
+          format: int64
+          minimum: 1
+        user_id:
+          type: integer
+          format: int64
+          minimum: 1
+        content:
+          type: string
+          minLength: 1
+        created_at:
+          type: string
+          format: date-time
+    TaskStatusCounts:
+      type: object
+      required:
+        - todo
+        - in_progress
+        - hold
+        - done
+        - cancel
+      properties:
+        todo:
+          type: integer
+          format: int64
+          minimum: 0
+        in_progress:
+          type: integer
+          format: int64
+          minimum: 0
+        hold:
+          type: integer
+          format: int64
+          minimum: 0
+        done:
+          type: integer
+          format: int64
+          minimum: 0
+        cancel:
+          type: integer
+          format: int64
+          minimum: 0
+    TopAssignee:
+      type: object
+      required:
+        - assignee_id
+        - name
+        - closed_tasks
+      properties:
+        assignee_id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+        closed_tasks:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Количество задач со статусом done за последние 30 дней
+    TeamStatsResponse:
+      type: object
+      required:
+        - team_id
+        - tasks_by_status
+        - top_assignees_last_30_days
+        - average_close_hours
+        - comments_count
+      properties:
+        team_id:
+          type: integer
+          format: int64
+          minimum: 1
+        tasks_by_status:
+          $ref: "#/components/schemas/TaskStatusCounts"
+        top_assignees_last_30_days:
+          type: array
+          maxItems: 3
+          description: Рейтинг только по выполненным задачам со статусом done; cancel не учитывается
+          items:
+            $ref: "#/components/schemas/TopAssignee"
+        average_close_hours:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: Среднее время выполнения задач done за всё время в часах; cancel не учитывается
+        comments_count:
+          type: integer
+          format: int64
+          minimum: 0
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Bearer JWT отсутствует, неверно оформлен, повреждён или просрочен
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+          description: Схема аутентификации Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: unauthorized
+    Forbidden:
+      description: Недостаточно прав для выполнения операции
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TeamNotFound:
+      description: Команда не найдена или недоступна текущему пользователю
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TaskNotFound:
+      description: Задача не найдена или недоступна текущему пользователю
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    VersionConflict:
+      description: Переданная версия задачи устарела
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  parameters:
+    TaskID:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор задачи
+      schema:
+        type: integer
+        format: int64
+        minimum: 1

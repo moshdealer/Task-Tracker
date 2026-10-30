@@ -17,6 +17,7 @@ type Config struct {
 	App      App      `mapstructure:"app"`
 	HTTP     HTTP     `mapstructure:"http"`
 	Database Database `mapstructure:"database"`
+	Redis    Redis    `mapstructure:"redis"`
 	JWT      JWT      `mapstructure:"jwt"`
 	Log      Log      `mapstructure:"log"`
 }
@@ -44,6 +45,10 @@ type Database struct {
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+}
+
+type Redis struct {
+	URL string `mapstructure:"url"`
 }
 
 type Log struct {
@@ -92,6 +97,9 @@ func Load() (Config, error) {
 			MaxIdleConns:    v.GetInt("DB_MAX_IDLE_CONNS"),
 			ConnMaxLifetime: v.GetDuration("DB_CONN_MAX_LIFETIME"),
 		},
+		Redis: Redis{
+			URL: strings.TrimSpace(v.GetString("REDIS_URL")),
+		},
 		JWT: JWT{
 			Secret: strings.TrimSpace(v.GetString("JWT_SECRET")),
 			TTL:    v.GetDuration("JWT_TTL"),
@@ -120,6 +128,7 @@ var environmentVariables = []string{
 	"DB_MAX_OPEN_CONNS",
 	"DB_MAX_IDLE_CONNS",
 	"DB_CONN_MAX_LIFETIME",
+	"REDIS_URL",
 	"JWT_SECRET",
 	"JWT_TTL",
 	"LOG_LEVEL",
@@ -146,6 +155,9 @@ func (c Config) validate() error {
 	}
 	if c.JWT.Secret == "" {
 		return fmt.Errorf("config: JWT_SECRET is required")
+	}
+	if c.Redis.URL == "" {
+		return fmt.Errorf("config: REDIS_URL is required")
 	}
 	if c.HTTP.Port < 1 || c.HTTP.Port > 65535 {
 		return fmt.Errorf("config: HTTP_PORT must be between 1 and 65535")

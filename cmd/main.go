@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,12 +12,17 @@ import (
 	"sync"
 	"syscall"
 
+	"task-tracker/internal/analytics"
 	"task-tracker/internal/auth"
+	"task-tracker/internal/comments"
+	platformcache "task-tracker/internal/platform/cache"
 	"task-tracker/internal/platform/config"
 	"task-tracker/internal/platform/database"
 	"task-tracker/internal/platform/httpserver"
 	"task-tracker/internal/platform/jwt"
 	"task-tracker/internal/platform/logger"
+	"task-tracker/internal/tasks"
+	"task-tracker/internal/teams"
 	"task-tracker/migrations"
 )
 
@@ -24,6 +30,7 @@ import (
 type App struct {
 	config config.Config
 	db     *sql.DB
+	cache  *platformcache.Redis
 	server *httpserver.Server
 }
 
@@ -73,17 +80,47 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	slog.Info("database migrations are up to date")
 
+	redisCache, err := platformcache.NewRedis(ctx, cfg.Redis)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	slog.Info("connected to Redis")
+
 	tokenManager := jwt.New(cfg.JWT)
 	authRepository := auth.NewRepository(db)
 	authService := auth.NewService(authRepository, tokenManager)
 	authHandler := auth.NewHandler(authService)
+	authMiddleware := auth.NewMiddleware(tokenManager)
+
+	teamsRepository := teams.NewRepository(db)
+	teamsService := teams.NewService(teamsRepository)
+	teamsHandler := teams.NewHandler(teamsService)
+
+	tasksRepository := tasks.NewRepository(db)
+	tasksListCache := tasks.NewListCache(redisCache)
+	tasksService := tasks.NewService(tasksRepository, teamsService, tasksListCache)
+	tasksHandler := tasks.NewHandler(tasksService)
+
+	commentsRepository := comments.NewRepository(db)
+	commentsService := comments.NewService(commentsRepository, tasksService, teamsService)
+	commentsHandler := comments.NewHandler(commentsService)
+
+	analyticsRepository := analytics.NewRepository(db)
+	analyticsService := analytics.NewService(analyticsRepository, teamsService)
+	analyticsHandler := analytics.NewHandler(analyticsService)
 
 	handler := http.NewServeMux()
 	authHandler.RegisterRoutes(handler)
+	teamsHandler.RegisterRoutes(handler, authMiddleware.Authenticate)
+	tasksHandler.RegisterRoutes(handler, authMiddleware.Authenticate)
+	commentsHandler.RegisterRoutes(handler, authMiddleware.Authenticate)
+	analyticsHandler.RegisterRoutes(handler, authMiddleware.Authenticate)
 
 	return &App{
 		config: cfg,
 		db:     db,
+		cache:  redisCache,
 		server: httpserver.New(cfg.HTTP, handler),
 	}, nil
 }
@@ -130,11 +167,14 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
-// Close освобождает ресурсы приложения
 func (a *App) Close() error {
+	var closeErrors []error
+	if err := a.cache.Close(); err != nil {
+		closeErrors = append(closeErrors, err)
+	}
 	if err := a.db.Close(); err != nil {
-		return fmt.Errorf("database: close connection pool: %w", err)
+		closeErrors = append(closeErrors, fmt.Errorf("database: close connection pool: %w", err))
 	}
 
-	return nil
+	return errors.Join(closeErrors...)
 }
